@@ -26,3 +26,10 @@
 #廣東話男性話題
 #粵語男性心法
 #山而王其
+
+
+# 具
+
+[字轉聱](https://www.minimax.io/audio/text-to-speech)
+
+[自動up片](https://colab.research.google.com/drive/11V1ULSfR_tJ4x1Z-AX4OpLguR3sJuHA6?hl=zh-tw#scrollTo=_hkkgdurBy0D)
