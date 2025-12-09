@@ -1,5 +1,6 @@
 '''
-海螺 txt版 202512061358
+
+202512092050
 
 ✅ 步驟 1：建立 YouTube Data API OAuth 憑證
 
@@ -33,12 +34,12 @@ Application type 選：
 
 2 將 client_secret_xxx.json 重新命名為 client_secret.json，
 同時放到本機的 取ytAPI.py 同目錄下 
-並上傳到 Google Drive : 我的雲端硬碟/山而王其/autoUpYtMP4/secret
+並上傳到 Google Drive : 我的雲端硬碟/山而王其/secret
 
 3 執行 取ytAPI.py 時，會自動開啟瀏覽器讓你登入 Google 帳號
 選擇gmail再選擇yt頻道，並授權
 授權完成後會在本機同目錄下產生 token.pickle 憑證，
-上傳到 Google Drive : 我的雲端硬碟/山而王其/autoUpYtMP4/secret
+上傳到 Google Drive : 我的雲端硬碟/山而王其/secret
 
 '''
 
@@ -72,10 +73,29 @@ print("憑證已生成：token.pickle")
 # ===============================================================
 #                   🔰 -1 環境準備  🔰
 # ===============================================================
-!apt-get install -y fonts-wqy-microhei  # 安裝文泉驛微米黑（支持中文/粵語）
+# 检查GPU是否启用
+!nvidia-smi
+# 确认FFmpeg支持NVIDIA硬件编码
+!ffmpeg -encoders | grep nvenc
+
+!apt-get install -y fonts-noto-cjk  # 安裝文泉驛微米黑（支持中文/粵語）
 !fc-list | grep "wqy-microhei"  # 驗證字體是否安裝成功（會顯示字體路徑）
 !pip install --upgrade openai-whisper  # 升級到最新版以支持粵語
 !pip install openai-whisper google-api-python-client google-auth-oauthlib google-auth-httplib2 requests moviepy pydub pysrt
+!apt-get install -y librubberband2 ffmpeg # rubberband 滤镜用于音频变调 安装 librubberband2 后，ffmpeg 才能正常使用 rubberband 滤镜
+
+
+
+# ===== 用colab密鑰避免api暴露 =====
+from google.colab import userdata
+from google.colab import drive
+drive.mount('/content/drive')
+
+import os, glob, subprocess, json, pickle, time, requests, whisper, shutil
+from subprocess import CalledProcessError  
+
+
+
 
 
 # ===============================================================
@@ -131,27 +151,48 @@ else:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 # ===============================================================
 #                   🔰 1 掛載 Google Drive + 設定資料夾  🔰
 # ===============================================================
 
-# ===== 用colab密鑰避免api暴露 =====
-from google.colab import userdata
-from google.colab import drive
-drive.mount('/content/drive')
 
-import os, glob, subprocess, json, pickle
-import requests, whisper
 
-'''
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # ===== 設定資料夾 =====
-AUDIO_FOLDER = AutoUpYtGDrive+"錄音"
-m4a_files = glob.glob(os.path.join(AUDIO_FOLDER, "*.m4a"))
-
+AUDIO_FOLDER = AutoUpYtGDrive
+m4a_files = glob.glob(os.path.join(AUDIO_FOLDER, "*.mp3"))
 if not m4a_files:
-    print("❌ 沒有 m4a，程式結束")
-    raise SystemExit()
-
+    print("!! 沒有 mp3，找 m4a")
+    m4a_files = glob.glob(os.path.join(AUDIO_FOLDER, "*.m4a"))
+    if not m4a_files:
+        print("❌ 沒有 m4a，程式結束")
+        raise SystemExit()
 input_audio = m4a_files[0]
 base_name = os.path.splitext(os.path.basename(input_audio))[0]
 print("🎧 音訊檔：", input_audio)
@@ -160,13 +201,12 @@ print("🎧 音訊檔：", input_audio)
 #                   🔰 2 M4A → WAV  🔰
 # ===============================================================
 wav_path = f"/content/{base_name}.wav"
-# 移除强制单声道和采样率，保留原始音频属性（避免失真）
 cmd = [
     "ffmpeg", "-y", "-i", input_audio,
-    #"-filter:a", "rubberband=transposition=-2",  # 降低2个key（-2 = 降2个半音）
+    #"-filter:a", "rubberband=pitch=-8", # 降8度
     "-ar", "16000", "-ac", "1",  # 保持采样率和声道设置（如需保留原始可移除）
     wav_path
-    ]  # 移除 -ar 16000 -ac 1
+    ]
 subprocess.run(cmd, check=True)  # 增加check=True，出错时直接报错
 
 # 转换后检查WAV文件
@@ -174,101 +214,7 @@ if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1024:
     print("❌ WAV文件生成失败！")
     raise SystemExit()
 print("主音訊直接使用原始 wav：", wav_path)
-'''
 
-
-
-
-
-
-# ===============================================================
-#                   🔰 2 文字轉海螺ai語音  🔰
-# ===============================================================
-
-print('='*18)
-print(f"1: 請填寫您的文稿 將自動轉ai語音")
-答 = input("填寫文稿後，請在此處按 Enter 鍵繼續...").strip()
-
-import requests
-import base64
-import whisper
-
-def generate_wav_tts(text):
-
-    url = "https://api.minimax.chat/v1/text-to-speech/synthesize"
-    group_id = "1996944212859298102"  # 從API Key解析出的Group ID
-
-    api_key = userdata.get("海螺_API")
-    voice_id = userdata.get("海螺VOICE_ID")
-
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Group-ID": group_id  # 補充必需的Group-ID頭
-    }
-
-    payload = {
-        "model": "speech-01",
-        "text": text,
-        "voice_setting": {
-            "voice_id": voice_id,
-            "lang": "yue",
-            "speed": 1.0,
-            "vol": 1.0,
-            "pitch": 0
-        },
-        "audio_setting": {
-            "format": "wav",  # wav / mp3 / flac
-            "sample_rate": 32000,
-            "channel": 1
-        },
-        "stream": False  # 非串流一次生成
-    }
-
-    print("⏳ 正在向 MiniMax 中國區請求語音合成...")
-
-    try:
-        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
-        resp.raise_for_status()  # 拋出HTTP錯誤
-    except requests.exceptions.HTTPError as e:
-        print(f"❌ HTTP錯誤: {str(e)}")
-        print("響應內容:", resp.text)
-        return None
-    except Exception as e:
-        print(f"❌ 請求失敗: {str(e)}")
-        return None
-
-    try:
-        data = resp.json()
-    except json.JSONDecodeError:
-        print("❌ 無效的JSON回應")
-        print("回應內容:", resp.text)
-        return None
-
-    # 檢查API業務碼
-    base_resp = data.get("base_resp", {})
-    if base_resp.get("status_code") != 0:
-        print(f"❌ 業務錯誤: {base_resp.get('status_msg', '未知錯誤')}")
-        return None
-
-    audio_hex = data.get("data", {}).get("audio")
-    if not audio_hex:
-        print("❌ 未返回音頻數據")
-        print("完整回應:", data)
-        return None
-    # 保存音頻文件
-    try:
-        audio_bytes = bytes.fromhex(audio_hex)
-        with open("output.wav", "wb") as f:
-            f.write(audio_bytes)
-        print("🎉 音頻生成成功: output.wav")
-        return "output.wav"
-    except Exception as e:
-        print(f"❌ 保存音頻失敗: {str(e)}")
-        return None
-    
-wav_path = generate_wav_tts(答)
 
 # ===============================================================
 #                   🔰 3 Whisper 生成字幕  🔰
@@ -315,204 +261,588 @@ input("修改完成後，請在此處按 Enter 鍵繼續...")  # 等待用戶確
 with open(srt_path, "r", encoding="utf-8") as f:
     modified_srt = f.read()
 # 验证是否读取到修改内容（打印前2行）
-print("修改後的字幕前5行：")
-print("\n".join(modified_srt.split("\n")[:5]))
+print("修改後的字幕前20行：")
+print("\n".join(modified_srt.split("\n")[:20]))
 print("已加載修改後的字幕")
 
 
-# ===============================================================
-#     🔰 6 Pexels 影片下載（支援 2 把 API Key 自動輪替） 🔰
-# ===============================================================
 
-# 讀取可用的 key（支援你現在的兩個 key 名字）
-PEXELS_KEYS = []
 
-k0 = userdata.get("PEXELS_API_KEY")
-if k0:
-    PEXELS_KEYS.append(k0)
 
-k1 = userdata.get("PEXELS_API_KEY_1")
-if k1:
-    PEXELS_KEYS.append(k1)
 
-if not PEXELS_KEYS:
-    raise SystemExit("❌ 沒有設定 PEXELS_API_KEY 或 PEXELS_API_KEY_1")
 
-print(f"🔑 已載入 {len(PEXELS_KEYS)} 個 Pexels API Key：", PEXELS_KEYS)
 
-# 目前使用的 Key index
-key_index = 0
-def get_headers():
-    """回傳目前 Key"""
-    return {"Authorization": PEXELS_KEYS[key_index]}
 
-def rotate_key():
-    """輪替到下一把 Key"""
-    global key_index
-    key_index = (key_index + 1) % len(PEXELS_KEYS)
-    print(f"🔁 已切換到 API Key #{key_index+1}")
 
-# 自動計算音訊時長
-audio_probe = subprocess.Popen(
-    ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", wav_path],
-    stdout=subprocess.PIPE
-)
-audio_info = json.loads(audio_probe.communicate()[0])
-total_needed_duration = float(audio_info["format"]["duration"])
-print(f"需要影片總時長：{total_needed_duration:.2f} 秒")
 
-os.makedirs("/content/videos_temp/raw", exist_ok=True)
-os.makedirs("/content/videos_temp/square", exist_ok=True)
 
-current_total = 0
-page = 1
-downloaded_videos = []
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ===============================================================
-#                 🔁 循環下載，直到長度足夠
+#                   🔰 6 下载视频（本地优先 + Pexels fallback） 🔰
 # ===============================================================
-while current_total < total_needed_duration:
 
-    url = f"https://api.pexels.com/videos/search?query={query}&per_page=1&page={page}"
+def download_pexels_4k_video(query):
+    """
+    从Pexels下载4K视频（自动处理API密钥轮换和视频筛选）
+    返回下载后的视频路径（/content/raw_4k.mp4）
+    """
+    global key_index  # 声明使用全局变量
+    
+    # 读取API Key
+    PEXELS_KEYS = []
+    k0 = userdata.get("PEXELS_API_KEY")
+    if k0: PEXELS_KEYS.append(k0)
+    k1 = userdata.get("PEXELS_API_KEY_1")
+    if k1: PEXELS_KEYS.append(k1)
+    k2 = userdata.get("PEXELS_API_KEY_2")
+    if k2: PEXELS_KEYS.append(k2)
+    if not PEXELS_KEYS:
+        raise SystemExit("❌ 没有设置PEXELS API KEY")
 
-    try:
-        res = requests.get(url, headers=get_headers(), timeout=12)
+    key_index = 0
+    def get_headers():
+        return {"Authorization": PEXELS_KEYS[key_index]}
+    def rotate_key():
+        global key_index
+        key_index = (key_index + 1) % len(PEXELS_KEYS)
+        print(f"🔁 切换到API Key #{key_index+1}")
+
+    # 搜索4K视频
+    page = 1
+    selected_video_url = None
+    selected_video_duration = None
+
+    print("🔎 尝试从Pexels获取4K影片...")
+    while True:
+        url = f"https://api.pexels.com/videos/search?query={query}&per_page=10&page={page}"
+        res = requests.get(url, headers=get_headers())
 
         if res.status_code == 429:
-            print("⚠️ API 用量超額 → 自動切換 Key")
+            print("⚠️ API次数用完，切换Key")
             rotate_key()
             continue
 
         data = res.json()
+        videos = data.get("videos", [])
+        if not videos:
+            print("⚠️ 没有更多影片，换下一頁")
+            page += 1
+            continue
 
-    except Exception as e:
-        print("❌ API 呼叫錯誤 → 切換 Key", e)
-        rotate_key()
-        continue
+        # 查找3840x2160（4K）视频
+        for v in videos:
+            for f in v["video_files"]:
+                if f["width"] == 3840 and f["height"] == 2160:
+                    selected_video_url = f["link"]
+                    selected_video_duration = v["duration"]
+                    break
+            if selected_video_url:
+                break
 
-    # 沒影片 → 換下一頁
-    if not data.get("videos"):
-        print("⚠️ 找不到影片，換下一頁")
+        if selected_video_url:
+            print(f"🎥 已选到4K影片（长度 {selected_video_duration}s）")
+            break
+
         page += 1
-        continue
 
-    # 取第一部影片
-    video_info = data["videos"][0]
-    video_file = video_info["video_files"][0]
-    video_url = video_file["link"]
-    video_duration = video_info["duration"]
+    # 下载4K视频
+    raw_video = "/content/raw_4k.mp4"
+    !wget -q -O {raw_video} "{selected_video_url}"
+    print("📥 Pexels 4K影片已下载")
+    return raw_video
 
-    raw_video_path = f"/content/videos_temp/raw/video_{page}.mp4"
-    !wget -q -O {raw_video_path} "{video_url}"
 
-    # =========================================================
-    #    🔰 7 將影片裁剪成 1:1（避免拼接錯誤）🔰
-    # =========================================================
-    square_video_path = f"/content/videos_temp/square/video_{page}_square.mp4"
+# 检查AUDIO_FOLDER中是否有现成的MP4文件
+mp4_files = glob.glob(os.path.join(AUDIO_FOLDER, "*.mp4"))
+raw_video = "/content/raw_4k.mp4"  # 目标视频路径
 
-    probe = subprocess.Popen(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", raw_video_path],
-        stdout=subprocess.PIPE
+if mp4_files:
+    # 如果有本地MP4，使用第一个并复制到目标路径
+    local_mp4 = mp4_files[0]
+    print(f"📂 发现本地MP4文件：{local_mp4}")
+    shutil.copy2(local_mp4, raw_video)  # 保留元数据复制
+    print(f"✅ 已将本地MP4复制到：{raw_video}")
+else:
+    # 如果没有本地MP4，调用Pexels下载函数
+    print("❌ 未发现本地MP4文件，将从Pexels下载...")
+    raw_video = download_pexels_4k_video(query)  # 使用前面定义的查询关键词
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ===============================================================
+#                   🔰 8 製作循環影片 🔰
+# ===============================================================
+
+
+#     🔰 实时提示 🔰
+def print_with_timestamp(msg):
+    """带时间戳的提示打印"""
+    timestamp = time.strftime("[%H:%M:%S] ", time.localtime())
+    print(f"{timestamp}{msg}", flush=True)  # flush=True 确保立即输出（不缓存）
+
+def run_ffmpeg_with_progress(cmd, step_desc):
+    """执行FFmpeg命令，带执行中提示和错误捕获"""
+    # 1. 打印开始提示
+    print_with_timestamp(f"⏳ 开始：{step_desc}")
+    start_time = time.time()
+    
+    # 2. 执行命令（实时输出FFmpeg日志，避免卡住无反馈）
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # 将stderr重定向到stdout，统一捕获
+        encoding="utf-8",
+        bufsize=1,  # 行缓冲，实时输出
+        universal_newlines=True
     )
-    streams = json.loads(probe.communicate()[0])["streams"]
-    video_stream = next(s for s in streams if s["codec_type"] == "video")
-
-    width = video_stream["width"]
-    height = video_stream["height"]
-
-    if width > height:
-        crop_filter = f"crop={height}:{height}:(in_w-{height})/2:0"
+    
+    # 3. 实时打印FFmpeg输出（可选，看是否需要）
+    for line in process.stdout:
+        # 过滤无关日志，只打印关键信息（比如进度、帧处理）
+        if "frame=" in line or "time=" in line or "duration=" in line:
+            print(f"  📝 {line.strip()}", flush=True)
+    
+    # 4. 等待命令结束，获取返回码
+    process.wait()
+    elapsed = round(time.time() - start_time, 2)
+    
+    # 5. 结果判断
+    if process.returncode == 0:
+        print_with_timestamp(f"✅ 完成：{step_desc}（耗时 {elapsed} 秒）")
+        return True
     else:
-        crop_filter = f"crop={width}:{width}:0:(in_h-{width})/2"
-
-    subprocess.run([
-        "ffmpeg", "-y", "-i", raw_video_path,
-        "-vf", crop_filter,
-        "-c:v", "libx264", "-crf", "23",
-        "-c:a", "copy",
-        square_video_path
-    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    downloaded_videos.append({"path": square_video_path, "duration": video_duration})
-    current_total += video_duration
-
-    print(f"📥 已處理 {page} 號影片（{video_duration}s），累計：{current_total:.2f}s")
-
-    page += 1
+        print_with_timestamp(f"❌ 失败：{step_desc}（耗时 {elapsed} 秒）")
+        raise CalledProcessError(process.returncode, cmd)
 
 # ===============================================================
-#                   🔰 8 拼接多個1:1視頻 🔰
+#     🔰 新增：获取视频实际时长 🔰
 # ===============================================================
-concat_list = "/content/concat_list.txt"
-with open(concat_list, "w") as f:
-    for video in downloaded_videos:
-        f.write(f"file '{video['path']}'\n")
+def get_video_duration(video_path):
+    """自动获取视频时长（秒），无需手动输入"""
+    print_with_timestamp(f"🔍 检测视频 {os.path.basename(video_path)} 时长...")
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path
+    ]
+    result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+    duration = float(result.stdout.strip())
+    print_with_timestamp(f"✅ 视频时长：{duration:.2f} 秒 | 音频时长：{audio_duration:.2f} 秒")
+    return duration
 
-concatenated_video = "/content/concatenated.mp4"
+# ===============================================================
+#     🔰 核心修改：极速循环/截取视频 🔰
+# ===============================================================
+looped_video = "/content/looped.mp4"
+temp_concat_list = "/content/concat_list.txt"
+temp_short_clip = "/content/temp_short_clip.mp4"
+
+# 1. 获取原视频时长
+video_duration = get_video_duration(raw_video)
+
+# 2. 判断处理逻辑：截取（音频更短） or 拼接（音频更长）
+if audio_duration <= video_duration:
+    # 情况1：音频比视频短 → 直接截取视频（极速，无编码）
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", "0",                  # 从开头截取
+        "-i", raw_video,
+        "-t", str(audio_duration),   # 截取到音频时长
+        "-c", "copy",                # 流拷贝，无编码（关键！）
+        looped_video
+    ]
+    run_ffmpeg_with_progress(
+        cmd,
+        f"截取视频至音频长度（{audio_duration:.2f}s）"
+    )
+
+else:
+    # 情况2：音频比视频长 → 拼接补充（极速，无编码）
+    need_extra = audio_duration - video_duration  # 需要补充的时长
+    loop_times = int(need_extra // video_duration)  # 完整循环次数
+    extra_clip_duration = need_extra % video_duration  # 最后补充的片段时长
+
+    # 生成拼接清单
+    print_with_timestamp(f"📝 需补充时长：{need_extra:.2f}秒 → 循环{loop_times}次 + 补充{extra_clip_duration:.2f}秒")
+    with open(temp_concat_list, "w", encoding="utf-8") as f:
+        # 写入原视频
+        f.write(f"file '{raw_video}'\n")
+        # 写入完整循环次数
+        for _ in range(loop_times):
+            f.write(f"file '{raw_video}'\n")
+        # 提取并写入最后补充的片段（若有）
+        if extra_clip_duration > 0.1:  # 忽略0.1秒内的微小差值
+            # 提取原视频前N秒（流拷贝，极速）
+            extract_cmd = [
+                "ffmpeg", "-y",
+                "-ss", "0",
+                "-i", raw_video,
+                "-t", f"{extra_clip_duration:.2f}",
+                "-c", "copy",
+                temp_short_clip
+            ]
+            run_ffmpeg_with_progress(
+                extract_cmd,
+                f"提取补充片段（{extra_clip_duration:.2f}s）"
+            )
+            f.write(f"file '{temp_short_clip}'\n")
+
+    # 拼接所有片段（流拷贝，极速）
+    concat_cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",                # 允许绝对路径
+        "-i", temp_concat_list,
+        "-c", "copy",                # 流拷贝，无编码（关键！）
+        looped_video
+    ]
+    run_ffmpeg_with_progress(
+        concat_cmd,
+        f"拼接视频至音频长度（{audio_duration:.2f}s）"
+    )
+
+    # 清理临时文件
+    for temp_file in [temp_concat_list, temp_short_clip]:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            print_with_timestamp(f"🗑️ 清理临时文件：{os.path.basename(temp_file)}")
+
+# 最终提示
+print_with_timestamp(f"🔁 已建立循环影片（长度={audio_duration:.2f}s）")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+cut_video = looped_video # 9 步驟已合併在 8 步驟中
+'''
+# ===============================================================
+#                   🔰 9 裁切剛好音訊長度 🔰
+# ===============================================================
+
+cut_video = "/content/video_cut.mp4"
 cmd = [
     "ffmpeg", "-y",
-    "-f", "concat", "-safe", "0",
-    "-i", concat_list,
-    "-c:v", "copy", "-c:a", "copy",  # 直接複製（因已統一編碼）
-    concatenated_video
-]
-result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-if result.returncode != 0:
-    print("視頻拼接錯誤：", result.stderr.decode())
-    raise SystemExit()
-print(f"1:1視頻拼接完成：{concatenated_video}")
-
-# ===============================================================
-#                   🔰 9 裁切拼接後的視頻到音頻時長 🔰
-# ===============================================================
-cut_video = "/content/cut.mp4"
-cmd = [
-    "ffmpeg", "-i", concatenated_video,
-    "-t", str(total_needed_duration),  # 裁切到與音頻相同時長
-    "-c:v", "copy", "-c:a", "copy",
+    "-i", looped_video,
+    "-t", str(audio_duration),
+    "-c:v", "copy",
+    "-c:a", "copy",
     cut_video
 ]
-subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-print(f"視頻裁切完成（匹配音頻時長{total_needed_duration:.2f}秒）")
-
+subprocess.run(cmd, check=True)
+print("✂️ 影片裁切完成")
+'''
 # ===============================================================
 #                   🔰 10 合併音訊到影片 🔰
 # ===============================================================
-merged_video = f"/content/{base_name}_merged.mp4"
+merged_video = f"/content/合聲_{base_name}.mp4"
 cmd = [
-    "ffmpeg", "-y", "-i", cut_video, "-i", wav_path,
+    "ffmpeg", "-y",
+    "-i", cut_video,
+    "-i", wav_path,
     "-map", "0:v", "-map", "1:a",
-    "-c:v", "copy", 
-    "-c:a", "aac", "-b:a", "192k",  # 指定音频比特率192k
+    "-c:v", "copy",
+    "-c:a", "aac", "-b:a", "192k",
     merged_video
 ]
-subprocess.run(cmd, check=True, capture_output=True)
-print("影片合成完成：", merged_video)
+subprocess.run(cmd, check=True)
+print("🎬 合併音訊完成：", merged_video)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ===============================================================
 #                   🔰 11 燒錄字幕（硬字幕） 🔰
 # ===============================================================
-final_video = f"/content/{base_name}_final.mp4"
+
+def get_video_height(video_path):
+    """取得影片高度（用 ffprobe）"""
+    cmd = [
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_streams", video_path
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    info = json.loads(result.stdout)
+
+    for stream in info["streams"]:
+        if stream["codec_type"] == "video":
+            return int(stream["height"])
+    return 1080   # fallback 預設 1080p
+
+
+final_video = f"/content/合字_{base_name}.mp4"
 # 确认SRT文件存在且路径正确
 if not os.path.exists(srt_path):
     print(f"❌ 找不到字幕文件：{srt_path}")
     raise SystemExit()
 # 打印实际使用的字幕路径
 print(f"使用字幕文件：{os.path.abspath(srt_path)}")
+
+video_height = get_video_height(merged_video)
+# 1080x1080正方形视频：2.5%比例，最大27px，最小16px
+fontsize = max(16, min(27, int(video_height * 0.025)))  
+print(f"主影片高度：{video_height}px → 字幕字体大小：{fontsize}px")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'''
+sub_filter = (
+    f"subtitles='{srt_path}':force_style="
+    f"'Fontname=Noto Sans CJK TC,Fontsize={fontsize},"
+    f"PrimaryColour=&HFFFFE5&,OutlineColour=&HA04000&,"
+    f"BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=40'"
+)
+
 cmd = [
     "ffmpeg", "-y", "-i", merged_video,
-    "-vf", f"subtitles={srt_path}:force_style='Fontsize=20,FontName=WenQuanYi Micro Hei'",
+    #"-vf", f"subtitles={srt_path}:force_style='Fontsize=20,FontName=WenQuanYi Micro Hei'",
+    "-vf", sub_filter,
     "-c:a", "copy",
     final_video
 ]
 subprocess.run(cmd, check=True, capture_output=True)
 print("字幕已燒錄：", final_video)
+'''
+
+
+# ===================== 优化后的字幕烧录逻辑 =====================
+
+
+def burn_subtitle_fast(merged_video, srt_path, fontsize, final_video):
+    """
+    4K字幕烧录（极速版：30fps+轻量级编码）
+    """
+    # 1. 复制字幕到本地
+    local_srt = f"/content/local_{base_name}.srt"
+    if os.path.exists(local_srt):
+        os.remove(local_srt)
+        print_with_timestamp(f"🗑️ 已删除旧本地字幕文件：{local_srt}")
+    shutil.copy(srt_path, local_srt)
+    print_with_timestamp(f"📝 字幕已复制到本地：{local_srt}")
+
+    # 2. 字幕滤镜（简化特效，减少渲染耗时）
+    sub_filter = (
+        f"fps=30, scale=1920:1080, "  # 4K→2K+30fps
+        f"subtitles='{local_srt}':force_style="
+        f"'Fontname=WenQuanYi Micro Hei,Fontsize={fontsize},"
+        f"PrimaryColour=&HFFFFE5&,OutlineColour=&HA04000&,"
+        f"BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=40'"
+    )
+
+    # 3. 极致提速的编码命令（4K 30fps）
+    cmd = [
+        "ffmpeg", "-y",
+        "-fflags", "+genpts", "-flush_packets", "1",  # 禁用缓存，强制重读文件
+        "-i", merged_video,
+        "-vf", sub_filter,
+        "-c:v", "libx264",
+        "-preset", "ultrafast",    # 最快预设
+        "-crf", "28",              # 轻微压缩（观感无差别）
+        "-profile:v", "main",      # 降低编码复杂度（4K 30fps足够）
+        "-level", "5.0",           # 适配30fps 4K
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",            # 音频不编码
+        "-threads", "16",          # 启用多线程（Colab默认16核）
+        final_video
+    ]
+
+    # 执行命令+实时进度
+    print_with_timestamp("⏳ 开始极速烧录4K字幕（30fps+多线程）...")
+    start_time = time.time()
+    try:
+        # 实时打印进度（避免卡顿无反馈）
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            bufsize=1
+        )
+        # 只打印关键进度（减少日志输出）
+        for line in process.stdout:
+            if "frame=" in line and "time=" in line:
+                print(f"  📊 {line.strip()}", flush=True)
+        process.wait()
+
+        if process.returncode != 0:
+            raise CalledProcessError(process.returncode, cmd)
+        
+        elapsed = round(time.time() - start_time, 2)
+        print_with_timestamp(f"✅ 4K字幕烧录完成！耗时 {elapsed} 秒")
+        shutil.rmtree(local_srt, ignore_errors=True)
+        return True
+    except CalledProcessError as e:
+        print_with_timestamp(f"❌ 字幕烧录失败：{e.stderr[:1000]}")  # 只打印前1000字符
+        raise
+
+
+
+
+# 执行GPU加速烧录
+burn_subtitle_fast(merged_video, srt_path, fontsize, final_video)
+print("字幕已燒錄：", final_video)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ===============================================================
 #            🔰 12 重新設計的片頭 + 主影片 + 片尾合成 🔰
 # ===============================================================
 
-
+import json
+import os
 import subprocess
 
 print("\n=================【開始 第12部分：片頭片尾合成】=================\n")
@@ -529,7 +859,7 @@ INTRO_FADED = "/content/intro_faded.mp4"
 MAIN_FADED = "/content/main_faded.mp4"
 OUTRO_FADED = "/content/outro_faded.mp4"
 
-FINAL_COMBINED = "/content/final_with_intro_outro.mp4"
+FINAL_COMBINED = f"/content/全片_{base_name}.mp4"
 
 # ========== 工具函式：安全執行 ffmpeg ==========
 def run_ffmpeg(cmd, desc):
@@ -548,7 +878,7 @@ def convert_to_square(src, dst):
         "ffmpeg", "-y", "-i", src,
         "-vf", "crop='min(in_w, in_h)':'min(in_w, in_h)'",
         "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-        "-c:a", "aac",
+        "-c:a", "copy",
         dst
     ]
     run_ffmpeg(cmd, f"裁成 1:1 → {dst}")
@@ -569,7 +899,7 @@ def fade_in_out(src, dst, fadein=0.8, fadeout=0.8):
         "-vf", f"fade=t=in:st=0:d={fadein},fade=t=out:st={fadeout_start}:d={fadeout}",
         "-af", f"afade=t=in:st=0:d={fadein},afade=t=out:st={fadeout_start}:d={fadeout}",
         "-c:v", "libx264", "-preset", "veryfast",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "16000", "-ac", "1",
         dst
     ]
     run_ffmpeg(cmd, f"淡入淡出 → {dst}")
@@ -581,7 +911,7 @@ def fade_only_in(src, dst, fadein=0.8):
         "-vf", f"fade=t=in:st=0:d={fadein}",
         "-af", f"afade=t=in:st=0:d={fadein}",
         "-c:v", "libx264", "-preset", "veryfast",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "16000", "-ac", "1",
         dst
     ]
     run_ffmpeg(cmd, f"主影片淡入 → {dst}")
@@ -617,15 +947,37 @@ run_ffmpeg([
     "ffmpeg", "-y",
     "-f", "concat", "-safe", "0",
     "-i", concat_txt,
-    "-c:v", "libx264", "-c:a", "aac",
+    "-c:v", "libx264", "-c:a", "copy",
     FINAL_COMBINED
-], "拼接 final_with_intro_outro.mp4")
+], f"拼接 全片_{base_name}.mp4")
 
 print("\n🎬【片頭 + 主影片 + 片尾】全部完成！")
 print("最終輸出：", FINAL_COMBINED)
 
 # 更新上傳用檔案
 final_video = FINAL_COMBINED
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ===============================================================
 #                   🔰 13 自動上傳 YouTube 🔰
